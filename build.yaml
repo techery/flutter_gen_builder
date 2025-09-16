@@ -1,0 +1,12 @@
+# Build configuration for flutter_gen_builder package
+
+builders:
+  flutter_gen_builder:
+    import: "package:flutter_gen_builder/flutter_gen_builder.dart"
+    builder_factories: ["flutterGenBuilder"]
+    build_extensions:
+      "pubspec.yaml":
+        - ".dart_tool/flutter_gen_synthetic/pubspec.yaml"
+        # Note: Localization files (.dart) are created dynamically by the builder
+    auto_apply: dependents
+    build_to: source

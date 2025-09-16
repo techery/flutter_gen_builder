@@ -1,0 +1,12 @@
+name: flutter_gen_builder
+description: Custom build_runner builder for creating synthetic flutter_gen package
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  build: 3.1.0
+  path: 1.9.1
+  yaml: 3.1.3
