@@ -16,21 +16,12 @@ class FlutterGenBuilder implements Builder {
   @override
   Map<String, List<String>> get buildExtensions => {
         // Create pubspec.yaml for existing flutter_gen directory
-        // Only process the main pubspec.yaml, not assets/pubspec.yaml
         'pubspec.yaml': ['.dart_tool/flutter_gen/pubspec.yaml'],
       };
 
   @override
   Future<void> build(BuildStep buildStep) async {
     try {
-      // Skip processing pubspec.yaml files that are not in the root directory
-      // Only process the main pubspec.yaml in the project root
-      if (buildStep.inputId.path != 'pubspec.yaml') {
-        log.info(
-            '⏭️ Skipping ${buildStep.inputId.path} - only processing root pubspec.yaml');
-        return;
-      }
-
       log.info(
         '🚀 FlutterGenBuilder: Starting automatic flutter_gen package creation...',
       );
@@ -72,9 +63,6 @@ class FlutterGenBuilder implements Builder {
       // Step 5: Enhance existing flutter_gen directory with pubspec.yaml
       await _enhanceFlutterGenPackage(buildStep, outputDir);
 
-      // Step 6: Update package_config.json to include flutter_gen package
-      await _updatePackageConfigDirect(options.config);
-
       // Step 7: Clean up temporary merged translations directory
       await _cleanupMergedTranslations();
 
@@ -98,15 +86,6 @@ class FlutterGenBuilder implements Builder {
       log.warning('Source directory not found: $sourceDir');
       return;
     }
-
-    // Create pubspec.yaml for existing flutter_gen directory
-    final pubspecContent = _generateFlutterGenPubspec();
-    final pubspecOutput = AssetId(
-      buildStep.inputId.package,
-      '.dart_tool/flutter_gen/pubspec.yaml',
-    );
-    await buildStep.writeAsString(pubspecOutput, pubspecContent);
-    log.info('✅ Enhanced flutter_gen directory with pubspec.yaml');
 
     // No need to create lib structure - we'll use gen_l10n directly
 
@@ -230,52 +209,6 @@ class FlutterGenBuilder implements Builder {
     }
   }
 
-  /// Update package_config.json for main app and configured packages
-  Future<void> _updatePackageConfigDirect(Map<String, dynamic> config) async {
-    try {
-      final currentDir = Directory.current.absolute.path;
-      final flutterGenPackagePath = '$currentDir/.dart_tool/flutter_gen';
-
-      // Update main app package_config.json
-      await _updateSinglePackageConfig(
-        '.dart_tool/package_config.json',
-        flutterGenPackagePath,
-      );
-
-      // Get update configuration from build.yaml
-      final updatePackages = config['update_packages'];
-      final updatePackagesMap = updatePackages is Map
-          ? Map<String, dynamic>.from(updatePackages)
-          : null;
-
-      if (updatePackagesMap != null) {
-        // Update modules based on configuration
-        final modules = updatePackagesMap['modules'];
-        final modulesMap =
-            modules is Map ? Map<String, dynamic>.from(modules) : null;
-        if (modulesMap != null) {
-          await _updateModulesFromConfig(modulesMap, flutterGenPackagePath);
-        }
-
-        // Update configured sibling apps
-        final apps = updatePackagesMap['apps'];
-        final appsList = apps is List ? apps.cast<String>() : null;
-        if (appsList != null) {
-          await _updateConfiguredApps(appsList, flutterGenPackagePath);
-        }
-      } else {
-        // Fallback to old behavior if no configuration provided
-        log.info(
-          '📋 No update_packages configuration found, using default behavior',
-        );
-        await _updateAllModules(flutterGenPackagePath);
-        await _updateSiblingApps(flutterGenPackagePath);
-      }
-    } catch (e) {
-      log.warning('Failed to update package configs: $e');
-    }
-  }
-
   /// Update a single package_config.json file
   Future<void> _updateSinglePackageConfig(
     String configPath,
@@ -333,31 +266,14 @@ class FlutterGenBuilder implements Builder {
         log.info('📋 Updating ALL modules (update_all: true)');
         await _updateAllModules(flutterGenPackagePath);
       } else {
-        // Check for specific modules list (old format)
         final specificModules = modulesConfig['specific'];
         final modulesList =
             specificModules is List ? specificModules.cast<String>() : null;
-
         if (modulesList != null && modulesList.isNotEmpty) {
           log.info('📋 Updating specific modules: ${modulesList.join(', ')}');
           await _updateSpecificModules(modulesList, flutterGenPackagePath);
         } else {
-          // Check for configured modules with custom paths (new format)
-          final configuredModules = <String, dynamic>{};
-          for (final entry in modulesConfig.entries) {
-            if (entry.key != 'update_all' && entry.key != 'specific') {
-              configuredModules[entry.key] = entry.value;
-            }
-          }
-
-          if (configuredModules.isNotEmpty) {
-            log.info(
-                '📋 Updating configured modules: ${configuredModules.keys.join(', ')}');
-            await _updateConfiguredModules(
-                configuredModules, flutterGenPackagePath);
-          } else {
-            log.info('📋 No modules configured for update');
-          }
+          log.info('📋 No modules configured for update');
         }
       }
     } catch (e) {
@@ -395,53 +311,6 @@ class FlutterGenBuilder implements Builder {
       }
     } catch (e) {
       log.warning('Failed to update specific modules: $e');
-    }
-  }
-
-  /// Update package_config.json for configured modules with custom paths
-  Future<void> _updateConfiguredModules(
-    Map<String, dynamic> modulesConfig,
-    String flutterGenPackagePath,
-  ) async {
-    try {
-      for (final entry in modulesConfig.entries) {
-        final moduleName = entry.key;
-        final moduleConfig = entry.value;
-
-        // Get custom path or use default
-        String modulePath;
-        if (moduleConfig is Map && moduleConfig.containsKey('path')) {
-          modulePath = moduleConfig['path'] as String;
-        } else {
-          // Default path for backward compatibility
-          modulePath = '../modules/$moduleName';
-        }
-
-        final moduleDir = Directory(modulePath);
-        if (moduleDir.existsSync()) {
-          final modulePackageConfig = File(
-            path.join(moduleDir.path, '.dart_tool/package_config.json'),
-          );
-
-          if (modulePackageConfig.existsSync()) {
-            await _updateSinglePackageConfig(
-              modulePackageConfig.path,
-              flutterGenPackagePath,
-            );
-            log.info(
-                '📦 Updated package_config.json for module: $moduleName (path: $modulePath)');
-          } else {
-            log.warning(
-              '⚠️  package_config.json not found for module: $moduleName (path: $modulePath)',
-            );
-          }
-        } else {
-          log.warning(
-              '⚠️  Module directory not found: $moduleName (path: $modulePath)');
-        }
-      }
-    } catch (e) {
-      log.warning('Failed to update configured modules: $e');
     }
   }
 
@@ -557,15 +426,6 @@ class FlutterGenBuilder implements Builder {
     } catch (e) {
       log.warning('Failed to update sibling apps package configs: $e');
     }
-  }
-
-  String _generateFlutterGenPubspec() {
-    return '''
-name: flutter_gen
-description: Enhanced flutter_gen package for automatic localization
-version: 1.0.0
-publish_to: none
-''';
   }
 
   /// Check if we need to merge ARB files (for app extensions like app2)
@@ -708,10 +568,10 @@ publish_to: none
           final fileName = path.basename(file.path);
           localArbFiles.add(fileName);
 
-          // Extract locale from filename using patterns: prefix_locale.arb or prefix_locale_REGION.arb
-          final locale = _extractLocaleFromFileName(fileName);
-          if (locale != null) {
-            locales.add(locale);
+          // Extract locale from filename using pattern: prefix_locale.arb
+          final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+          if (match != null) {
+            locales.add(match.group(1)!);
           }
         }
       }
@@ -733,10 +593,12 @@ publish_to: none
             final fileName = path.basename(file.path);
             baseArbFiles.add(fileName);
 
-            // Extract locale from base app files using patterns: prefix_locale.arb or prefix_locale_REGION.arb
-            final locale = _extractLocaleFromFileName(fileName);
-            if (locale != null) {
-              locales.add(locale);
+            // Extract locale from base app files
+            final match = RegExp(
+              r'^[^_]+_([a-z]{2})\.arb$',
+            ).firstMatch(fileName);
+            if (match != null) {
+              locales.add(match.group(1)!);
             }
           }
         }
@@ -755,8 +617,6 @@ publish_to: none
         '📋 Found ${baseArbFiles.length} base ARB files: ${baseArbFiles.join(', ')}',
       );
     }
-
-    log.info('📋 Detected locales: ${locales.join(', ')}');
 
     return result;
   }
@@ -785,11 +645,9 @@ publish_to: none
         if (file is File && file.path.endsWith('.arb')) {
           final fileName = path.basename(file.path);
 
-          // Check if this file is for a supported locale using patterns: prefix_locale.arb or prefix_locale_REGION.arb
-          final locale = _extractLocaleFromFileName(fileName);
-          if (locale != null &&
-              supportedLocales.any((supportedLocale) =>
-                  _localeMatches(locale, supportedLocale))) {
+          // Check if this file is for a supported locale
+          final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+          if (match != null && supportedLocales.contains(match.group(1))) {
             final outputPath = path.join(outputDir.path, fileName);
             await file.copy(outputPath);
             log.info('📋 Copied $fileName to output directory');
@@ -824,21 +682,9 @@ publish_to: none
     final extensionFiles = await _getArbFilesByLocale(extensionPath);
 
     for (final locale in supportedLocales) {
-      // Find matching files for this locale (exact match or fallback)
-      final baseFile = _findMatchingFile(baseFiles, locale);
-      final extensionFile = _findMatchingFile(extensionFiles, locale);
-
-      log.info('🔄 Processing locale: $locale');
-      if (baseFile != null) {
-        log.info('   - Base file: ${path.basename(baseFile)}');
-      }
-      if (extensionFile != null) {
-        log.info('   - Extension file: ${path.basename(extensionFile)}');
-      }
-
       await _mergeLocaleFilesAuto(
-        baseFile,
-        extensionFile,
+        baseFiles[locale],
+        extensionFiles[locale],
         outputPath,
         locale,
       );
@@ -861,8 +707,9 @@ publish_to: none
     await for (final file in directory.list()) {
       if (file is File && file.path.endsWith('.arb')) {
         final fileName = path.basename(file.path);
-        final locale = _extractLocaleFromFileName(fileName);
-        if (locale != null) {
+        final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+        if (match != null) {
+          final locale = match.group(1)!;
           result[locale] = file.path;
         }
       }
@@ -978,48 +825,5 @@ publish_to: none
     } catch (e) {
       log.warning('Failed to clean up merged translations directory: $e');
     }
-  }
-
-  /// Extract locale from ARB filename
-  /// Supports patterns: prefix_locale.arb and prefix_locale_REGION.arb
-  /// Examples: app_de.arb -> de, app_de_DE.arb -> de_DE
-  String? _extractLocaleFromFileName(String fileName) {
-    final match =
-        RegExp(r'^[^_]+_([a-z]{2}(?:_[A-Z]{2})?)\.arb$').firstMatch(fileName);
-    return match?.group(1);
-  }
-
-  /// Check if a locale matches a supported locale (handles fallback from region-specific to language-only)
-  /// Examples: de_DE matches de, en_US matches en
-  bool _localeMatches(String fileLocale, String supportedLocale) {
-    if (fileLocale == supportedLocale) return true;
-
-    // If file locale has region (e.g., de_DE) and supported locale is language-only (e.g., de)
-    if (fileLocale.contains('_') && !supportedLocale.contains('_')) {
-      final fileLanguage = fileLocale.split('_')[0];
-      return fileLanguage == supportedLocale;
-    }
-
-    return false;
-  }
-
-  /// Find a matching file for a locale, with fallback logic
-  /// First tries exact match, then falls back to language-only match
-  String? _findMatchingFile(Map<String, String?> files, String targetLocale) {
-    // First try exact match
-    if (files.containsKey(targetLocale)) {
-      return files[targetLocale];
-    }
-
-    // Then try fallback: if target is language-only (e.g., 'de'), look for region-specific (e.g., 'de_DE')
-    if (!targetLocale.contains('_')) {
-      for (final fileLocale in files.keys) {
-        if (fileLocale.startsWith('${targetLocale}_')) {
-          return files[fileLocale];
-        }
-      }
-    }
-
-    return null;
   }
 }
