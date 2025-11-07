@@ -11,6 +11,20 @@ Builder flutterGenBuilder(BuilderOptions options) => FlutterGenBuilder(options);
 class FlutterGenBuilder implements Builder {
   final BuilderOptions options;
 
+  /// Regex pattern to extract locale codes from ARB filenames.
+  /// Supports both language-only codes (e.g., 'en', 'zh') and
+  /// language_COUNTRY codes (e.g., 'en_US', 'zh_CN').
+  ///
+  /// Pattern explanation:
+  /// - `^[^_]+_` - Matches prefix followed by underscore (e.g., 'app_')
+  /// - `([a-z]{2}(?:_[A-Z]{2})?)` - Captures locale code:
+  ///   - `[a-z]{2}` - Two lowercase letters for language (e.g., 'en')
+  ///   - `(?:_[A-Z]{2})?` - Optional non-capturing group for country code:
+  ///     - `_[A-Z]{2}` - Underscore followed by two uppercase letters (e.g., '_US')
+  ///     - `?` - Makes the entire country code optional
+  /// - `\.arb$` - Ends with '.arb'
+  static final _arbLocalePattern = RegExp(r'^[^_]+_([a-z]{2}(?:_[A-Z]{2})?)\.arb$');
+
   FlutterGenBuilder(this.options);
 
   @override
@@ -350,7 +364,7 @@ class FlutterGenBuilder implements Builder {
           localArbFiles.add(fileName);
 
           // Extract locale from filename using pattern: prefix_locale.arb
-          final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+          final match = _arbLocalePattern.firstMatch(fileName);
           if (match != null) {
             locales.add(match.group(1)!);
           }
@@ -375,9 +389,7 @@ class FlutterGenBuilder implements Builder {
             baseArbFiles.add(fileName);
 
             // Extract locale from base app files
-            final match = RegExp(
-              r'^[^_]+_([a-z]{2})\.arb$',
-            ).firstMatch(fileName);
+            final match = _arbLocalePattern.firstMatch(fileName);
             if (match != null) {
               locales.add(match.group(1)!);
             }
@@ -427,7 +439,7 @@ class FlutterGenBuilder implements Builder {
           final fileName = path.basename(file.path);
 
           // Check if this file is for a supported locale
-          final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+          final match = _arbLocalePattern.firstMatch(fileName);
           if (match != null && supportedLocales.contains(match.group(1))) {
             final outputPath = path.join(outputDir.path, fileName);
             await file.copy(outputPath);
@@ -488,7 +500,7 @@ class FlutterGenBuilder implements Builder {
     await for (final file in directory.list()) {
       if (file is File && file.path.endsWith('.arb')) {
         final fileName = path.basename(file.path);
-        final match = RegExp(r'^[^_]+_([a-z]{2})\.arb$').firstMatch(fileName);
+        final match = _arbLocalePattern.firstMatch(fileName);
         if (match != null) {
           final locale = match.group(1)!;
           result[locale] = file.path;
